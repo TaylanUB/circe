@@ -192,9 +192,7 @@ useless; new colors are picked by finding the one whose assigned
 nick spoke least recently.")
 
 (defvar circe-nick-color-mapping (make-hash-table :test 'equal)
-  "Hash-table from nicks to (color . timestamp) tuples where the
-timestamp tells when the color was least used, i.e. any of the
-nicks the color is assigned to last had an activity.")
+  "Hash-table from nicks to colors.")
 
 (defun circe-nick-color-nick-list ()
   "Return list of all nicks that have a color assigned to them.
@@ -206,40 +204,38 @@ Own nick is excluded."
              circe-nick-color-mapping)
     nicks))
 
+(defvar circe-nick-color-timestamps (make-hash-table :test 'equal)
+  "Hash-table from colors to the timestamp of their last use.")
+
 (defun circe-nick-color-for-nick (nick)
   "Return the color for NICK.  Assigns a color to NICK if one
 wasn't assigned already."
-  (let ((entry (gethash nick circe-nick-color-mapping)))
-    (if (not entry)
-        (let ((color (circe-nick-color-pick)))
-          (puthash nick (cons color (cadr (current-time)))
-                   circe-nick-color-mapping)
-          color)
-      (setcdr entry (cadr (current-time)))
-      (car entry))))
+  (let ((color (gethash nick circe-nick-color-mapping)))
+    (when (not color)
+      (setq color (circe-nick-color-pick))
+      (puthash nick color circe-nick-color-mapping))
+    (puthash color (float-time) circe-nick-color-timestamps)
+    color))
 
 (defun circe-nick-color-pick ()
   "Picks either a color from the pool of unused colors, or the
 color that was used least recently (i.e. nicks that have it
 assigned have been least recently active)."
-  (if (not (null circe-nick-color-pool))
-      (pop circe-nick-color-pool)
-    (circe-nick-color-pick-least-recent)))
+  (or (pop circe-nick-color-pool)
+      (circe-nick-color-pick-least-recent)))
 
 (defun circe-nick-color-pick-least-recent ()
   "Pick the color that was used least recently.
 See `circe-nick-color-pick', which is where this is used."
   (let ((least-recent-color nil)
-        (biggest-time-gap -1))
+        (oldest-time (float-time)))
     (maphash
-     (lambda (nick entry)
-       (let ((color (car entry))
-             (time-gap (- (cadr (current-time)) (cdr entry))))
-         (if (> time-gap biggest-time-gap)
-             (progn
-               (setq biggest-time-gap time-gap)
-               (setq least-recent-color color)))))
-     circe-nick-color-mapping)
+     (lambda (color time)
+       (if (< time oldest-time)
+           (progn
+             (setq least-recent-color color)
+             (setq oldest-time time))))
+     circe-nick-color-timestamps)
     (if least-recent-color
         least-recent-color
       ;; Someone must have messed with `circe-nick-color-mapping', recover by
