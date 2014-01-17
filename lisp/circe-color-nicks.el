@@ -236,7 +236,9 @@ See `circe-nick-color-pick', which is where this is used."
        (let ((color (car entry))
              (time-gap (- (cadr (current-time)) (cdr entry))))
          (if (> time-gap biggest-time-gap)
-             (setq least-recent-color color))))
+             (progn
+               (setq biggest-time-gap time-gap)
+               (setq least-recent-color color)))))
      circe-nick-color-mapping)
     (if least-recent-color
         least-recent-color
