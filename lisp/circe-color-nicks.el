@@ -203,10 +203,18 @@ be mutated."
         (insert "The quick brown fox jumped over the lazy dog.\n")
         (put-text-property pt (point) 'face `(:foreground ,(pop pool)))))))
 
-(defvar circe-nick-color-pool (circe-nick-color-generate-pool)
+(defvar circe-nick-color-pool (if after-init-time
+                                  (circe-nick-color-generate-pool))
   "List of unused nick colors.  Once this is exhausted, it's
 useless; new colors are picked by finding the one whose assigned
 nick spoke least recently.")
+
+(defun circe-nick-color-pool-refill ()
+  "Set `circe-nick-color-pool' to (circe-nick-color-generate-pool)."
+  (setq circe-nick-color-pool (circe-nick-color-generate-pool)))
+
+(unless after-init-time
+  (add-hook 'emacs-startup-hook #'circe-nick-color-pool-refill))
 
 (defvar circe-nick-color-mapping (make-hash-table :test 'equal)
   "Hash-table from nicks to colors.")
