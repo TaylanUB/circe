@@ -129,68 +129,85 @@ readability."
         (/ l2 l1))))
 
 
-(defsubst circe-color-name-to-rgb (color)
+(defun circe-color-alist ()
+  "Return list of colors (name rgb lab) where rgb is 0 to 1."
+  (let ((alist (if (display-graphic-p)
+                   color-name-rgb-alist
+                 (mapcar (lambda (c)
+                           (cons (car c) (cddr c)))
+                         (tty-color-alist))))
+        (valmax (float (car (color-values "#ffffff")))))
+    (mapcar (lambda (c)
+              (let* ((name (car c))
+                     (rgb (mapcar (lambda (v)
+                                    (/ v valmax))
+                                  (cdr c)))
+                     (lab (apply #'color-srgb-to-lab rgb)))
+                (list name rgb lab)))
+            alist)))
+
+(defun circe-color-canonicalize-format (color)
+  "Turns COLOR into (name rgb lab) format.  Avoid calling this in
+a loop, it's very slow on a tty!"
+  (let* ((name color)
+         (rgb (circe-color-name-to-rgb color))
+         (lab (apply #'color-srgb-to-lab rgb)))
+   (list name rgb lab)))
+
+(defun circe-color-contrast-ratio (color1 color2)
+  "Gives the contrast ratio between two colors."
+  (circe-w3-contrast-contrast-ratio (nth 1 color1) (nth 1 color2)))
+
+(defun circe-color-diff (color1 color2)
+  "Gives the difference between two colors per CIEDE2000."
+  (color-cie-de2000 (nth 2 color1) (nth 2 color2)))
+
+(defun circe-color-name-to-rgb (color)
   "Like `color-name-to-rgb' but also handles \"unspecified-bg\"
 and \"unspecified-fg\"."
-  (let ((rgb (color-name-to-rgb color)))
-    (cond
-     (rgb rgb)
-     ((equal color "unspecified-bg") '(0 0 0))
-     ((equal color "unspecified-fg") '(1 1 1)))))
+  (cond ((equal color "unspecified-bg") '(0 0 0))
+        ((equal color "unspecified-fg") '(1 1 1))
+        (t (color-name-to-rgb color))))
 
-(defsubst circe-nick-color-contrast-ratio (color1 color2)
-  "Gives the contrast ratio between two colors."
-  (circe-w3-contrast-contrast-ratio (circe-color-name-to-rgb color1)
-                                    (circe-color-name-to-rgb color2)))
 
-(defsubst circe-nick-color-diff (color1 color2)
-  "Gives the difference between two colors per CIEDE2000."
-  (color-cie-de2000
-   (apply #'color-srgb-to-lab (circe-color-name-to-rgb color1))
-   (apply #'color-srgb-to-lab (circe-color-name-to-rgb color2))))
-
-(defsubst circe-nick-color-appropriate-p (color)
-  "Tells whether a color is appropriate for being a nick color."
-  (let ((bg (face-background 'default))
-        (fg (face-foreground 'default))
-        (my-msg (face-attribute 'circe-my-message-face :foreground)))
-    (and (>= (circe-nick-color-contrast-ratio color bg)
-             circe-color-nicks-min-contrast-ratio)
-         (>= (circe-nick-color-diff color fg)
-             circe-color-nicks-min-fg-difference)
-         (>= (circe-nick-color-diff color my-msg)
-             circe-color-nicks-min-my-message-difference))))
-
-(defsubst circe-nick-colors-too-similar-p (c1 c2)
-  "Tells whether two colors in CIE L*a*b* format are too similar
-per `circe-color-nicks-min-difference'."
-  (< (color-cie-de2000 c1 c2) circe-color-nicks-min-difference))
+(defun circe-nick-color-appropriate-p (color bg fg my-msg)
+  "Tells whether COLOR is appropriate for being a nick color.
+BG, FG, and MY-MSG are the background, foreground, and my-message
+colors; these are expected as parameters instead of computed here
+because computing them repeatedly is a heavy operation."
+  (and (>= (circe-color-contrast-ratio color bg)
+           circe-color-nicks-min-contrast-ratio)
+       (>= (circe-color-diff color fg)
+           circe-color-nicks-min-fg-difference)
+       (>= (circe-color-diff color my-msg)
+           circe-color-nicks-min-my-message-difference)))
 
 (defun circe-nick-colors-delete-similar (colors)
   "Return list COLORS with pairs of colors filtered out that are
 too similar per `circe-color-nicks-min-difference'.  COLORS may
 be mutated."
-  (let ((colors (mapcar (lambda (c)
-                          (cons c (apply #'color-srgb-to-lab
-                                         (circe-color-name-to-rgb c))))
-                        colors)))
-    (cl-mapl (lambda (rest)
-               (let ((color (cdar rest)))
-                 (setcdr rest
-                         (cl-delete-if (lambda (c)
-                                         (circe-nick-colors-too-similar-p
-                                          color (cdr c)))
-                                       (cdr rest))))
-               (setcar rest (caar rest)))
-             colors)
-    colors))
+  (cl-mapl (lambda (rest)
+             (let ((color (car rest)))
+               (setcdr rest (cl-delete-if
+                             (lambda (c)
+                               (< (circe-color-diff color c)
+                                  circe-color-nicks-min-difference))
+                             (cdr rest)))))
+           colors)
+  colors)
 
 (defun circe-nick-color-generate-pool ()
   "Return a list of appropriate nick colors."
-  (circe-nick-colors-delete-similar
-   (cl-remove-if-not
-    #'circe-nick-color-appropriate-p
-    (mapcar #'car color-name-rgb-alist))))
+  (let ((bg (circe-color-canonicalize-format (face-background 'default)))
+        (fg (circe-color-canonicalize-format (face-foreground 'default)))
+        (my-msg (circe-color-canonicalize-format
+                 (face-attribute
+                  'circe-my-message-face :foreground nil 'default))))
+    (mapcar #'car (circe-nick-colors-delete-similar
+                   (cl-remove-if-not
+                    (lambda (c)
+                      (circe-nick-color-appropriate-p c bg fg my-msg))
+                    (circe-color-alist))))))
 
 (defun circe-nick-color-pool-test ()
   "Display all appropriate nick colors in a temp buffer."
